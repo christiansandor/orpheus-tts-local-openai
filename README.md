@@ -30,11 +30,11 @@ A lightweight client for running [Orpheus TTS](https://huggingface.co/canopylabs
 
 ### TTS Settings in OpenWebUI
 
-Text-to-Speech Engine: OpenAI
-URL: http://localhost:5000/v1
-API: not-needed
-TTS Voice: Any from the "Available Voices" section
-TTS Model: not-needed
+- Text-to-Speech Engine: OpenAI.
+- URL: http://localhost:5000/v1.
+- API: not-needed.
+- TTS Voice: Any from the "Available Voices" section.
+- TTS Model: not-needed.
 
 ### Options
 
