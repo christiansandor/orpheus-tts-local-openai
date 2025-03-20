@@ -314,7 +314,7 @@ def main():
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host for the API server")
     parser.add_argument("--port", type=int, default=5000, help="Port for the API server")
     parser.add_argument("--debug", action="store_true", help="Run Flask in debug mode")
-    parser.add_argument("--api-url", type=str, default=DEFAULT_API_URL_PREFIX, help=f"API URL prefix (e.g., http://your-lm-studio-host:port), default: {DEFAULT_API_URL_PREFIX}")
+    parser.add_argument("--api-url-prefix", type=str, default=DEFAULT_API_URL_PREFIX, help=f"API URL prefix (e.g., http://your-lm-studio-host:port), default: {DEFAULT_API_URL_PREFIX}")
     parser.add_argument("--model", type=str, default=DEFAULT_MODEL_NAME, help=f"Model name for API payload, default: {DEFAULT_MODEL_NAME}")
 
 
