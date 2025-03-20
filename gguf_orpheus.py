@@ -13,13 +13,15 @@ import asyncio
 from flask import Flask, request, jsonify, stream_with_context, Response
 import re  # Import the regular expression module
 
-# LM Studio API settings (Keep these as they are)
-API_URL = "http://127.0.0.1:1234/v1/completions"
+# LM Studio API settings (These will now be configurable via arguments, defaults are kept)
+DEFAULT_API_URL_PREFIX = "http://127.0.0.1:1234"
+API_COMPLETIONS_ENDPOINT = "/v1/completions"
 HEADERS = {
     "Content-Type": "application/json"
 }
 
-# Model parameters (Keep these as they are)
+# Model parameters (Keep these as they are, but model name will be configurable)
+DEFAULT_MODEL_NAME = "orpheus-3b-0.1-ft-q4_k_m"
 MAX_TOKENS = 1200
 TEMPERATURE = 0.6
 TOP_P = 0.9
@@ -52,15 +54,17 @@ def format_prompt(prompt, voice=DEFAULT_VOICE):
 
     return f"{special_start}{formatted_prompt}{special_end}"
 
-def generate_tokens_from_api(prompt, voice=DEFAULT_VOICE, temperature=TEMPERATURE,
+def generate_tokens_from_api(prompt, api_url_prefix, model_name, voice=DEFAULT_VOICE, temperature=TEMPERATURE,
                             top_p=TOP_P, max_tokens=MAX_TOKENS, repetition_penalty=REPETITION_PENALTY):
     """Generate tokens from text using LM Studio API."""
     formatted_prompt = format_prompt(prompt, voice)
     print(f"Generating speech for: {formatted_prompt}")
 
+    api_url = api_url_prefix + API_COMPLETIONS_ENDPOINT # Construct the full API URL
+
     # Create the request payload for the LM Studio API (Keep these as they are)
     payload = {
-        "model": "orpheus-3b-0.1-ft-q4_k_m",  # Model name can be anything, LM Studio ignores it
+        "model": model_name, # Use the model name from arguments
         "prompt": formatted_prompt,
         "max_tokens": max_tokens,
         "temperature": temperature,
@@ -70,7 +74,7 @@ def generate_tokens_from_api(prompt, voice=DEFAULT_VOICE, temperature=TEMPERATUR
     }
 
     # Make the API request with streaming (Keep these as they are)
-    response = requests.post(API_URL, headers=HEADERS, json=payload, stream=True)
+    response = requests.post(api_url, headers=HEADERS, json=payload, stream=True)
 
     if response.status_code != 200:
         print(f"Error: API request failed with status code {response.status_code}")
@@ -156,11 +160,13 @@ def tokens_decoder_sync_generator(syn_token_gen):
     yield b''.join(audio_segments) # Yield all segments joined together at the end
 
 
-def generate_speech_from_api_generator(prompt, voice=DEFAULT_VOICE, temperature=TEMPERATURE,
+def generate_speech_from_api_generator(prompt, api_url_prefix, model_name, voice=DEFAULT_VOICE, temperature=TEMPERATURE,
                      top_p=TOP_P, max_tokens=MAX_TOKENS, repetition_penalty=REPETITION_PENALTY):
     """Generate speech from text using Orpheus model via LM Studio API and return audio byte stream generator."""
     token_generator = generate_tokens_from_api(
         prompt=prompt,
+        api_url_prefix=api_url_prefix, # Pass API URL prefix
+        model_name=model_name,       # Pass model name
         voice=voice,
         temperature=temperature,
         top_p=top_p,
@@ -209,6 +215,10 @@ def speech_endpoint():
         repetition_penalty = data.get('repetition_penalty', REPETITION_PENALTY)
         max_tokens = data.get('max_tokens', MAX_TOKENS)
 
+        # --- Get API URL prefix and model name from app config, fallback to defaults if not set ---
+        api_url_prefix = app.config.get('API_URL_PREFIX', DEFAULT_API_URL_PREFIX)
+        model_name = app.config.get('MODEL_NAME', DEFAULT_MODEL_NAME)
+
         # --- Filename and Output Folder Logic ---
         output_folder = "output"
         os.makedirs(output_folder, exist_ok=True) # Create 'output' folder if it doesn't exist
@@ -224,6 +234,8 @@ def speech_endpoint():
             all_audio_bytes = b'' # To accumulate all audio bytes
             audio_generator = generate_speech_from_api_generator(
                 prompt=text_input, # Use the extracted text_input here
+                api_url_prefix=api_url_prefix, # Use configured API URL prefix
+                model_name=model_name,       # Use configured model name
                 voice=voice,
                 temperature=temperature,
                 top_p=top_p,
@@ -302,6 +314,9 @@ def main():
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host for the API server")
     parser.add_argument("--port", type=int, default=5000, help="Port for the API server")
     parser.add_argument("--debug", action="store_true", help="Run Flask in debug mode")
+    parser.add_argument("--api-url", type=str, default=DEFAULT_API_URL_PREFIX, help=f"API URL prefix (e.g., http://your-lm-studio-host:port), default: {DEFAULT_API_URL_PREFIX}")
+    parser.add_argument("--model", type=str, default=DEFAULT_MODEL_NAME, help=f"Model name for API payload, default: {DEFAULT_MODEL_NAME}")
+
 
     args = parser.parse_args()
 
@@ -309,7 +324,13 @@ def main():
         list_available_voices()
         return
 
+    # Configure Flask app with API URL prefix and model name from arguments
+    app.config['API_URL_PREFIX'] = args.api_url_prefix
+    app.config['MODEL_NAME'] = args.model
+
     print("Starting Orpheus TTS API Server...")
+    print(f"API URL Prefix: {app.config['API_URL_PREFIX']}")
+    print(f"Model Name: {app.config['MODEL_NAME']}")
     print(f"Listening on http://{args.host}:{args.port}")
     app.run(host=args.host, port=args.port, debug=args.debug, threaded=False, processes=1) # important threaded=False and processes=1 for LM Studio
 
