@@ -1,4 +1,5 @@
-# Orpheus-TTS-Local
+# Orpheus-TTS-Local (OpenAI API Edition)
+## All the credit goes to [isaiahbjork](https://github.com/isaiahbjork/orpheus-tts-local) I only modified the gguf_orpheus.py with Gemini 2.0 Flash 01-21
 
 A lightweight client for running [Orpheus TTS](https://huggingface.co/canopylabs/orpheus-3b-0.1-ft) locally using LM Studio API.
 
@@ -15,32 +16,32 @@ A lightweight client for running [Orpheus TTS](https://huggingface.co/canopylabs
 2. Download the [Orpheus TTS model (orpheus-3b-0.1-ft-q4_k_m.gguf)](https://huggingface.co/isaiahbjork/orpheus-3b-0.1-ft-Q4_K_M-GGUF) in LM Studio
 3. Load the Orpheus model in LM Studio
 4. Start the local server in LM Studio (default: http://127.0.0.1:1234)
-5. Install dependencies:
+5. Clone this repo ```git clone https://github.com/AlgorithmicKing/orpheus-tts-local-openai.git```
+6. Install dependencies:
    ```
    python3 -m venv venv
    source venv/bin/activate
    pip install -r requirements.txt
    ```
-6. Run the script:
+7. Run the script:
    ```
-   python gguf_orpheus.py --text "Hello, this is a test" --voice tara
+   python gguf_orpheus.py
    ```
 
-## Usage
+### TTS Settings in OpenWebUI
 
-```
-python gguf_orpheus.py --text "Your text here" --voice tara --output "output.wav"
-```
+Text-to-Speech Engine: OpenAI
+URL: http://localhost:5000/v1
+API: not-needed
+TTS Voice: Any from the "Available Voices" section
+TTS Model: not-needed
 
 ### Options
 
-- `--text`: The text to convert to speech
-- `--voice`: The voice to use (default: tara)
-- `--output`: Output WAV file path (default: auto-generated filename)
-- `--list-voices`: Show available voices
-- `--temperature`: Temperature for generation (default: 0.6)
-- `--top_p`: Top-p sampling parameter (default: 0.9)
-- `--repetition_penalty`: Repetition penalty (default: 1.1)
+- `--list-voices`: List available TTS voices and exit. This will print the list of available voices to the console and then stop the server from starting.
+- `--host`: The host address to bind the API server to. (default: `0.0.0.0` - meaning it will listen on all available network interfaces, making it accessible from other machines on your network).
+- `--port`:  The port number to run the API server on. (default: `5000`).
+- `--debug`: Run the Flask API server in debug mode. Useful for development and seeing detailed error messages, but not recommended for production.
 
 ## Available Voices
 
