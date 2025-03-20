@@ -10,51 +10,55 @@ import argparse
 import threading
 import queue
 import asyncio
+from flask import Flask, request, jsonify, stream_with_context, Response
+import re  # Import the regular expression module
 
-# LM Studio API settings
+# LM Studio API settings (Keep these as they are)
 API_URL = "http://127.0.0.1:1234/v1/completions"
 HEADERS = {
     "Content-Type": "application/json"
 }
 
-# Model parameters
+# Model parameters (Keep these as they are)
 MAX_TOKENS = 1200
 TEMPERATURE = 0.6
 TOP_P = 0.9
 REPETITION_PENALTY = 1.1
 SAMPLE_RATE = 24000  # SNAC model uses 24kHz
 
-# Available voices based on the Orpheus-TTS repository
+# Available voices (Keep these as they are)
 AVAILABLE_VOICES = ["tara", "leah", "jess", "leo", "dan", "mia", "zac", "zoe"]
 DEFAULT_VOICE = "tara"  # Best voice according to documentation
 
-# Special token IDs for Orpheus model
+# Special token IDs (Keep these as they are)
 START_TOKEN_ID = 128259
 END_TOKEN_IDS = [128009, 128260, 128261, 128257]
 CUSTOM_TOKEN_PREFIX = "<custom_token_"
+
+app = Flask(__name__)
 
 def format_prompt(prompt, voice=DEFAULT_VOICE):
     """Format prompt for Orpheus model with voice prefix and special tokens."""
     if voice not in AVAILABLE_VOICES:
         print(f"Warning: Voice '{voice}' not recognized. Using '{DEFAULT_VOICE}' instead.")
         voice = DEFAULT_VOICE
-        
+
     # Format similar to how engine_class.py does it with special tokens
     formatted_prompt = f"{voice}: {prompt}"
-    
-    # Add special token markers for the LM Studio API
+
+    # Add special token markers for the LM Studio API (Keep these as they are)
     special_start = "<|audio|>"  # Using the additional_special_token from config
     special_end = "<|eot_id|>"   # Using the eos_token from config
-    
+
     return f"{special_start}{formatted_prompt}{special_end}"
 
-def generate_tokens_from_api(prompt, voice=DEFAULT_VOICE, temperature=TEMPERATURE, 
+def generate_tokens_from_api(prompt, voice=DEFAULT_VOICE, temperature=TEMPERATURE,
                             top_p=TOP_P, max_tokens=MAX_TOKENS, repetition_penalty=REPETITION_PENALTY):
     """Generate tokens from text using LM Studio API."""
     formatted_prompt = format_prompt(prompt, voice)
     print(f"Generating speech for: {formatted_prompt}")
-    
-    # Create the request payload for the LM Studio API
+
+    # Create the request payload for the LM Studio API (Keep these as they are)
     payload = {
         "model": "orpheus-3b-0.1-ft-q4_k_m",  # Model name can be anything, LM Studio ignores it
         "prompt": formatted_prompt,
@@ -64,16 +68,16 @@ def generate_tokens_from_api(prompt, voice=DEFAULT_VOICE, temperature=TEMPERATUR
         "repeat_penalty": repetition_penalty,
         "stream": True
     }
-    
-    # Make the API request with streaming
+
+    # Make the API request with streaming (Keep these as they are)
     response = requests.post(API_URL, headers=HEADERS, json=payload, stream=True)
-    
+
     if response.status_code != 200:
         print(f"Error: API request failed with status code {response.status_code}")
         print(f"Error details: {response.text}")
         return
-    
-    # Process the streamed response
+
+    # Process the streamed response (Keep these as they are)
     token_counter = 0
     for line in response.iter_lines():
         if line:
@@ -82,7 +86,7 @@ def generate_tokens_from_api(prompt, voice=DEFAULT_VOICE, temperature=TEMPERATUR
                 data_str = line[6:]  # Remove the 'data: ' prefix
                 if data_str.strip() == '[DONE]':
                     break
-                    
+
                 try:
                     data = json.loads(data_str)
                     if 'choices' in data and len(data['choices']) > 0:
@@ -93,23 +97,23 @@ def generate_tokens_from_api(prompt, voice=DEFAULT_VOICE, temperature=TEMPERATUR
                 except json.JSONDecodeError as e:
                     print(f"Error decoding JSON: {e}")
                     continue
-    
+
     print("Token generation complete")
 
 def turn_token_into_id(token_string, index):
     """Convert token string to numeric ID for audio processing."""
     # Strip whitespace
     token_string = token_string.strip()
-    
+
     # Find the last token in the string
     last_token_start = token_string.rfind(CUSTOM_TOKEN_PREFIX)
-    
+
     if last_token_start == -1:
         return None
-    
+
     # Extract the last token
     last_token = token_string[last_token_start:]
-    
+
     # Process the last token
     if last_token.startswith(CUSTOM_TOKEN_PREFIX) and last_token.endswith(">"):
         try:
@@ -123,177 +127,192 @@ def turn_token_into_id(token_string, index):
 
 def convert_to_audio(multiframe, count):
     """Convert token frames to audio."""
-    # Import here to avoid circular imports
-    from decoder import convert_to_audio as orpheus_convert_to_audio
+    from decoder import convert_to_audio as orpheus_convert_to_audio # keep import here
     return orpheus_convert_to_audio(multiframe, count)
 
-async def tokens_decoder(token_gen):
-    """Asynchronous token decoder that converts token stream to audio stream."""
+
+def tokens_decoder_sync_generator(syn_token_gen):
+    """Synchronous token decoder that converts token stream to audio byte stream.
+       Modified to yield ALL audio bytes as ONE single chunk at the end, instead of streaming segments.
+    """
+    audio_segments = [] # To collect all audio segments for saving to file
     buffer = []
     count = 0
-    async for token_text in token_gen:
+    for token_text in syn_token_gen:
         token = turn_token_into_id(token_text, count)
         if token is not None and token > 0:
             buffer.append(token)
             count += 1
-            
+
             # Convert to audio when we have enough tokens
             if count % 7 == 0 and count > 27:
                 buffer_to_proc = buffer[-28:]
                 audio_samples = convert_to_audio(buffer_to_proc, count)
                 if audio_samples is not None:
-                    yield audio_samples
+                    audio_segments.append(audio_samples) # Append segment for file saving
 
-def tokens_decoder_sync(syn_token_gen, output_file=None):
-    """Synchronous wrapper for the asynchronous token decoder."""
-    audio_queue = queue.Queue()
-    audio_segments = []
-    
-    # If output_file is provided, prepare WAV file
-    wav_file = None
-    if output_file:
-        # Create directory if it doesn't exist
-        os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
-        wav_file = wave.open(output_file, "wb")
-        wav_file.setnchannels(1)
-        wav_file.setsampwidth(2)
-        wav_file.setframerate(SAMPLE_RATE)
-    
-    # Convert the synchronous token generator into an async generator
-    async def async_token_gen():
-        for token in syn_token_gen:
-            yield token
+    # After generator finishes, yield ALL audio bytes as ONE single chunk
+    print("Tokens decoded, yielding ALL audio bytes as single chunk.") # Added log
+    yield b''.join(audio_segments) # Yield all segments joined together at the end
 
-    async def async_producer():
-        async for audio_chunk in tokens_decoder(async_token_gen()):
-            audio_queue.put(audio_chunk)
-        audio_queue.put(None)  # Sentinel to indicate completion
 
-    def run_async():
-        asyncio.run(async_producer())
-
-    # Start the async producer in a separate thread
-    thread = threading.Thread(target=run_async)
-    thread.start()
-
-    # Process audio as it becomes available
-    while True:
-        audio = audio_queue.get()
-        if audio is None:
-            break
-        
-        audio_segments.append(audio)
-        
-        # Write to WAV file if provided
-        if wav_file:
-            wav_file.writeframes(audio)
-    
-    # Close WAV file if opened
-    if wav_file:
-        wav_file.close()
-    
-    thread.join()
-    
-    # Calculate and print duration
-    duration = sum([len(segment) // (2 * 1) for segment in audio_segments]) / SAMPLE_RATE
-    print(f"Generated {len(audio_segments)} audio segments")
-    print(f"Generated {duration:.2f} seconds of audio")
-    
-    return audio_segments
-
-def stream_audio(audio_buffer):
-    """Stream audio buffer to output device."""
-    if audio_buffer is None or len(audio_buffer) == 0:
-        return
-    
-    # Convert bytes to NumPy array (16-bit PCM)
-    audio_data = np.frombuffer(audio_buffer, dtype=np.int16)
-    
-    # Normalize to float in range [-1, 1] for playback
-    audio_float = audio_data.astype(np.float32) / 32767.0
-    
-    # Play the audio
-    sd.play(audio_float, SAMPLE_RATE)
-    sd.wait()
-
-def generate_speech_from_api(prompt, voice=DEFAULT_VOICE, output_file=None, temperature=TEMPERATURE, 
+def generate_speech_from_api_generator(prompt, voice=DEFAULT_VOICE, temperature=TEMPERATURE,
                      top_p=TOP_P, max_tokens=MAX_TOKENS, repetition_penalty=REPETITION_PENALTY):
-    """Generate speech from text using Orpheus model via LM Studio API."""
-    return tokens_decoder_sync(
-        generate_tokens_from_api(
-            prompt=prompt, 
-            voice=voice,
-            temperature=temperature,
-            top_p=top_p,
-            max_tokens=max_tokens,
-            repetition_penalty=repetition_penalty
-        ),
-        output_file=output_file
+    """Generate speech from text using Orpheus model via LM Studio API and return audio byte stream generator."""
+    token_generator = generate_tokens_from_api(
+        prompt=prompt,
+        voice=voice,
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_tokens,
+        repetition_penalty=repetition_penalty
     )
+    return tokens_decoder_sync_generator(token_generator)
 
-def list_available_voices():
+
+@app.route('/v1/audio/speech', methods=['POST'])  # Explicitly define the endpoint as '/v1/audio/speech'
+def speech_endpoint():
+    """
+    Endpoint for speech generation, matching OpenWebUI's expected URL:
+    /v1/audio/speech
+    Expects text in the 'input' field of the JSON request (OpenWebUI format).
+    Modified to: 1) Save audio to disk FIRST. 2) Then send the SAVED file as response.
+    """
+    print("Request received at /v1/audio/speech")  # Log request arrival
+    try:
+        content_type = request.headers.get('Content-Type')
+        print(f"Content-Type: {content_type}") # Log Content-Type
+        if content_type != 'application/json':
+            print(f"Error: Expected application/json, but got: {content_type}")
+            return jsonify({"error": "Expected Content-Type: application/json"}), 400
+
+        data = request.get_json()
+        print(f"Received JSON data: {data}") # Log received JSON data
+
+        text_input = data.get('input') # Try to get text from 'input' field (OpenWebUI)
+        if not text_input:
+            text_input = data.get('text') # Fallback to 'text' field (if you might use it elsewhere)
+
+        if not text_input:
+            print("Error: Missing 'input' or 'text' in request body") # Log missing text error
+            return jsonify({"error": "Missing 'input' or 'text' in request body"}), 400
+
+        # --- Remove extra spaces from input text ---
+        text_input = text_input.strip() # Remove leading/trailing spaces
+        text_input = " ".join(text_input.split()) # Normalize internal spaces (optional, but good practice)
+
+        print(f"Extracted text from input: {text_input}") # Log extracted text
+
+        voice = data.get('voice', DEFAULT_VOICE) # Get voice from request, default to DEFAULT_VOICE
+        temperature = data.get('temperature', TEMPERATURE)
+        top_p = data.get('top_p', TOP_P)
+        repetition_penalty = data.get('repetition_penalty', REPETITION_PENALTY)
+        max_tokens = data.get('max_tokens', MAX_TOKENS)
+
+        # --- Filename and Output Folder Logic ---
+        output_folder = "output"
+        os.makedirs(output_folder, exist_ok=True) # Create 'output' folder if it doesn't exist
+
+        # Get first two words for filename
+        first_two_words = " ".join(text_input.strip().split()[:2])
+        safe_filename = re.sub(r'[^a-zA-Z0-9_]', '_', first_two_words) # Sanitize filename
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        output_file_path = os.path.join(output_folder, f"{safe_filename}_{timestamp}.wav")
+        print(f"Saving audio to: {output_file_path}") # Log saving path
+
+        def generate(): # Modified generate function - now just saves to file and returns filepath
+            all_audio_bytes = b'' # To accumulate all audio bytes
+            audio_generator = generate_speech_from_api_generator(
+                prompt=text_input, # Use the extracted text_input here
+                voice=voice,
+                temperature=temperature,
+                top_p=top_p,
+                repetition_penalty=repetition_penalty,
+                max_tokens=max_tokens
+            )
+            for audio_chunk in audio_generator: # Expecting only ONE chunk now from tokens_decoder_sync_generator
+                if isinstance(audio_chunk, bytes):
+                    all_audio_bytes += audio_chunk # Accumulate
+                else:
+                    print(f"Warning: Unexpected type from audio_generator: {type(audio_chunk)}")
+
+            print("Generate function finished, SAVING audio to file.") # Log saving
+
+            # --- Save WAV file ---
+            if all_audio_bytes: # Only save if there's audio data
+                with wave.open(output_file_path, "wb") as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2) # Assuming 16-bit PCM
+                    wf.setframerate(SAMPLE_RATE)
+                    wf.writeframes(all_audio_bytes)
+                print(f"Audio saved to: {output_file_path}")
+            else:
+                print("No audio data generated, skipping file save.")
+                return None # Indicate no file path to send
+
+            return output_file_path # Return the filepath of the saved file
+
+
+        # --- Generate and get output filepath ---
+        saved_file_path = generate() # Now generate() returns filepath
+
+        if saved_file_path: # Check if filepath was returned (meaning audio was generated and saved)
+            print(f"Reading saved audio file: {saved_file_path} for response.") # Log file reading
+            with open(saved_file_path, 'rb') as audio_file: # Open in binary read mode
+                audio_response_data = audio_file.read() # Read all file content into bytes
+            print("Sending saved audio file content as response.") # Log response sending
+            return Response(audio_response_data, mimetype='audio/wav') # Send file content as response
+        else:
+            return jsonify({"error": "Audio generation failed, no audio file saved."}), 500 # Error if no file
+
+
+    except Exception as e:
+        error_message = f"Exception in speech_endpoint: {e}"
+        print(error_message) # Log any exceptions
+        return jsonify({"error": error_message}), 500 # Return 500 for internal server error
+
+
+@app.route('/v1/audio/voices', methods=['GET']) # Changed to /v1/audio/voices
+def voices_endpoint():
+    """Returns a list of available voices for /v1/audio/voices endpoint"""
+    available_voices_list = [{"name": voice, "id": voice} for voice in AVAILABLE_VOICES] #openai style voices list
+    print(f"Serving voices list: {available_voices_list} at /v1/audio/voices") # Log voice list serving
+    return jsonify({"data": available_voices_list})
+
+@app.route('/', methods=['GET'])
+def root():
+    return jsonify({"message": "Orpheus TTS API is running"})
+
+
+def list_available_voices(): # Keep this function for command line utility
     """List all available voices with the recommended one marked."""
     print("Available voices (in order of conversational realism):")
     for i, voice in enumerate(AVAILABLE_VOICES):
         marker = "★" if voice == DEFAULT_VOICE else " "
         print(f"{marker} {voice}")
     print(f"\nDefault voice: {DEFAULT_VOICE}")
-    
+
     print("\nAvailable emotion tags:")
     print("<laugh>, <chuckle>, <sigh>, <cough>, <sniffle>, <groan>, <yawn>, <gasp>")
 
+
 def main():
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(description="Orpheus Text-to-Speech using LM Studio API")
-    parser.add_argument("--text", type=str, help="Text to convert to speech")
-    parser.add_argument("--voice", type=str, default=DEFAULT_VOICE, help=f"Voice to use (default: {DEFAULT_VOICE})")
-    parser.add_argument("--output", type=str, help="Output WAV file path")
-    parser.add_argument("--list-voices", action="store_true", help="List available voices")
-    parser.add_argument("--temperature", type=float, default=TEMPERATURE, help="Temperature for generation")
-    parser.add_argument("--top_p", type=float, default=TOP_P, help="Top-p sampling parameter")
-    parser.add_argument("--repetition_penalty", type=float, default=REPETITION_PENALTY, 
-                       help="Repetition penalty (>=1.1 required for stable generation)")
-    
+    parser = argparse.ArgumentParser(description="Orpheus Text-to-Speech API Server")
+    parser.add_argument("--list-voices", action="store_true", help="List available voices and exit")
+    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host for the API server")
+    parser.add_argument("--port", type=int, default=5000, help="Port for the API server")
+    parser.add_argument("--debug", action="store_true", help="Run Flask in debug mode")
+
     args = parser.parse_args()
-    
+
     if args.list_voices:
         list_available_voices()
         return
-    
-    # Use text from command line or prompt user
-    prompt = args.text
-    if not prompt:
-        if len(sys.argv) > 1 and sys.argv[1] not in ("--voice", "--output", "--temperature", "--top_p", "--repetition_penalty"):
-            prompt = " ".join([arg for arg in sys.argv[1:] if not arg.startswith("--")])
-        else:
-            prompt = input("Enter text to synthesize: ")
-            if not prompt:
-                prompt = "Hello, I am Orpheus, an AI assistant with emotional speech capabilities."
-    
-    # Default output file if none provided
-    output_file = args.output
-    if not output_file:
-        # Create outputs directory if it doesn't exist
-        os.makedirs("outputs", exist_ok=True)
-        # Generate a filename based on the voice and a timestamp
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        output_file = f"outputs/{args.voice}_{timestamp}.wav"
-        print(f"No output file specified. Saving to {output_file}")
-    
-    # Generate speech
-    start_time = time.time()
-    audio_segments = generate_speech_from_api(
-        prompt=prompt,
-        voice=args.voice,
-        temperature=args.temperature,
-        top_p=args.top_p,
-        repetition_penalty=args.repetition_penalty,
-        output_file=output_file
-    )
-    end_time = time.time()
-    
-    print(f"Speech generation completed in {end_time - start_time:.2f} seconds")
-    print(f"Audio saved to {output_file}")
+
+    print("Starting Orpheus TTS API Server...")
+    print(f"Listening on http://{args.host}:{args.port}")
+    app.run(host=args.host, port=args.port, debug=args.debug, threaded=False, processes=1) # important threaded=False and processes=1 for LM Studio
+
 
 if __name__ == "__main__":
-    main() 
+    main()
