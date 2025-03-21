@@ -1,7 +1,7 @@
 FROM python:3.12-slim
 
 ENV API_URL_PREFIX http://host.docker.internal:1234
-ENV MODEL_NAME orpheus-3b-0.1-ft-q4_k_m
+ENV MODEL_NAME orpheus-3b-0.1-ft
 
 WORKDIR /app
 

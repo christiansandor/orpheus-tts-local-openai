@@ -1,7 +1,7 @@
-# Orpheus-TTS-Local (OpenAI API Edition)
-## All the credit goes to [isaiahbjork](https://github.com/isaiahbjork/orpheus-tts-local) I only modified the gguf_orpheus.py with Gemini 2.0 Flash 01-21
+# OpenAI-compatible API for Orpheus-TTS-Local with Docker
 
-A lightweight client for running [Orpheus TTS](https://huggingface.co/canopylabs/orpheus-3b-0.1-ft) locally using LM Studio API.
+A lightweight client for running [Orpheus TTS](https://huggingface.co/canopylabs/orpheus-3b-0.1-ft) locally providing an OpenAI-compatible voice API, able to connect to
+any OpenAI-compatible LLM engine with the Orpheus model, such as [LM Studio](https://lmstudio.ai/).
 
 ## Features
 
@@ -80,4 +80,6 @@ You can add emotion to the speech by adding the following tags:
 ## License
 
 Apache 2.0
+
+## All the credit goes to [isaiahbjork](https://github.com/isaiahbjork/orpheus-tts-local) I only modified the gguf_orpheus.py with Gemini 2.0 Flash 01-21
 
