@@ -68,6 +68,15 @@ You can add emotion to the speech by adding the following tags:
 <gasp>
 ```
 
+## Docker setup
+
+1. Install [Docker](https://docs.docker.com/get-docker/)
+2. Clone this repo ```git clone https://github.com/AlgorithmicKing/orpheus-tts-local-openai.git```
+3. Run via docker-compose:
+   ```
+   docker-compose up # or docker-compose up orpheus-cpu for non-NVidia GPU/CPU
+   ```
+
 ## License
 
 Apache 2.0
